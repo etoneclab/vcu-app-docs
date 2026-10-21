@@ -7,4 +7,4 @@ Provider extension from Safari 26+. Sends an ISO 18013-7 Annex C
 Debugging tool only: no reader authentication, no issuer trust validation, and
 the HPKE-encrypted response is shown raw, not decrypted.
 
-Served at https://etoneclab.github.io/vcu-ios-app/
+Served at https://etoneclab.github.io/vcu-app-docs/

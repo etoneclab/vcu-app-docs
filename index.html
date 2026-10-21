@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VCu DC API Test Verifier</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #111418; --muted: #5b6573; --line: #dde2e8;
+    --panel: #f5f7f9; --accent: #1d4ed8; --ok: #15803d; --err: #b91c1c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0e1116; --fg: #e6e9ee; --muted: #9aa4b2; --line: #2a313b;
+            --panel: #161b22; --accent: #7aa2ff; --ok: #4ade80; --err: #f87171; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 16px/1.5 -apple-system, system-ui, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 24px; font-size: .95rem; }
+  fieldset { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin: 0 0 16px; }
+  legend { padding: 0 6px; color: var(--muted); font-size: .85rem; }
+  label { display: flex; gap: 8px; align-items: center; padding: 4px 0; }
+  input[type=text] { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 8px;
+                     background: var(--panel); color: var(--fg); font: 14px ui-monospace, monospace; }
+  .hint { color: var(--muted); font-size: .8rem; margin: 4px 0 0; }
+  button { width: 100%; padding: 14px; border: 0; border-radius: 10px; background: var(--accent);
+           color: #fff; font-size: 1rem; font-weight: 600; }
+  button:disabled { opacity: .5; }
+  #env { font-size: .85rem; margin: 0 0 16px; }
+  .ok { color: var(--ok); } .err { color: var(--err); }
+  pre { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px;
+        font: 12px/1.45 ui-monospace, monospace; white-space: pre-wrap; word-break: break-all; margin: 16px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>VCu DC API Test Verifier</h1>
+  <p class="sub">Sends an ISO 18013-7 Annex C (<code>org-iso-mdoc</code>) mDL request via
+    <code>navigator.credentials.get</code>. Debugging tool only: no trust validation, and responses are not decrypted.</p>
+
+  <div id="env"></div>
+
+  <fieldset>
+    <legend>Requested elements (org.iso.18013.5.1)</legend>
+    <label><input type="checkbox" name="el" value="age_over_18" checked> age_over_18</label>
+    <label><input type="checkbox" name="el" value="given_name"> given_name</label>
+    <label><input type="checkbox" name="el" value="family_name"> family_name</label>
+    <label><input type="checkbox" name="el" value="portrait"> portrait</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Experimental</legend>
+    <label for="aki">Issuer authority key identifier (hex)</label>
+    <input type="text" id="aki" placeholder="empty = no issuer filter" autocomplete="off" spellcheck="false">
+    <p class="hint">Adds <code>requestInfo.issuerIdentifiers</code> (18013-5 2nd edition, placement unverified).
+      Use it to test whether iOS matches this against the wallet's registered <code>supportedAuthorityKeyIdentifiers</code>.</p>
+  </fieldset>
+
+  <button id="go">Request mDL</button>
+  <pre id="log">Log appears here.</pre>
+</main>
+<script src="verifier.js"></script>
+</body>
+</html>

@@ -1,12 +1,13 @@
 // ISO 18013-7 Annex C ("org-iso-mdoc") test verifier for the VCu iOS
 // wallet. Builds the request, calls the Digital Credentials API, then
 // HPKE-decrypts the response with the ephemeral key kept in memory and shows
-// the disclosed elements. Issuer and device signatures are NOT verified here
-// — this is a debugging tool, not a verifier anyone should trust.
+// the disclosed elements with issuer-signature, digest and device-signature
+// checks. The Document Signer certificate is NOT chain-validated against an
+// IACA — this is a debugging tool, not a verifier anyone should trust.
 
 "use strict";
 
-const { Tag, cborEncode, cborDecode, b64url, fromB64url, hex, openResponse } = globalThis.VCu;
+const { Tag, cborEncode, cborDecode, b64url, fromB64url, hex, openResponse, sessionTranscript, verifyDocument } = globalThis.VCu;
 
 const logEl = document.getElementById("log");
 const resultEl = document.getElementById("result");
@@ -52,10 +53,18 @@ function encryptedResponseBytes(data) {
   throw new Error("unrecognized response shape: " + JSON.stringify(data).slice(0, 200));
 }
 
-function show(deviceResponse) {
+async function show(deviceResponse, transcript) {
   const rows = [];
+  const mark = (ok) => (ok ? '<b class="ok">✓</b>' : '<b class="err">✗</b>');
   for (const doc of deviceResponse.get("documents") ?? []) {
-    rows.push(`<h2>${escapeHtml(doc.get("docType"))}</h2><table>`);
+    rows.push(`<h2>${escapeHtml(doc.get("docType"))}</h2>`);
+    try {
+      const v = await verifyDocument(doc, transcript);
+      rows.push(`<p>${mark(v.issuerSignature)} issuer signature · ${mark(v.digests)} element digests · ${mark(v.deviceSignature)} device signature (bound to this session)</p>`);
+    } catch (e) {
+      rows.push(`<p class="err">Verification error: ${escapeHtml(e.message)}</p>`);
+    }
+    rows.push("<table>");
     for (const [ns, items] of doc.get("issuerSigned").get("nameSpaces")) {
       for (const item of items) {
         const e = cborDecode(item.value);
@@ -64,8 +73,7 @@ function show(deviceResponse) {
         rows.push(`<tr><td>${escapeHtml(ns)}</td><td>${escapeHtml(e.get("elementIdentifier"))}</td><td>${escapeHtml(shown)}</td></tr>`);
       }
     }
-    const signed = doc.get("deviceSigned")?.get("deviceAuth")?.has("deviceSignature");
-    rows.push(`</table><p class="hint">Device signature present: ${signed ? "yes" : "no"} (not verified by this page).</p>`);
+    rows.push(`</table><p class="hint">Document Signer certificate not chain-validated against an IACA on this page.</p>`);
   }
   resultEl.innerHTML = rows.join("");
 }
@@ -116,7 +124,7 @@ document.getElementById("go").addEventListener("click", async (ev) => {
     const deviceResponse = await openResponse(state.recipientKey, encryptedResponseBytes(credential.data),
                                               request.data.encryptionInfo, location.origin);
     log("Decrypted DeviceResponse, status " + deviceResponse.get("status"));
-    show(deviceResponse);
+    await show(deviceResponse, await sessionTranscript(request.data.encryptionInfo, location.origin));
   } catch (e) {
     // NotAllowedError: user cancelled or no matching provider; AbortError: timeout/cancel.
     log(`Error: ${e.name}: ${e.message}`);

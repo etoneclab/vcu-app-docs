@@ -138,5 +138,67 @@
     return cborDecode(plain);
   }
 
-  root.VCu = { Tag, cborEncode, cborDecode, b64url, fromB64url, hex, hpkeOpen, sessionTranscript, openResponse };
+  // --- Verification (issuer signature, digests, device signature) ------------
+  // Debug-grade: the Document Signer certificate is NOT chain-validated here.
+
+  /** SubjectPublicKeyInfo DER of an X.509 certificate (minimal DER walk). */
+  function spkiFromCertificate(der) {
+    let i = 0;
+    const header = () => {
+      const tag = der[i++]; let len = der[i++];
+      if (len & 0x80) { const n = len & 0x7f; len = 0; for (let k = 0; k < n; k++) len = len * 256 + der[i++]; }
+      return { tag, len, start: i };
+    };
+    header();                       // Certificate SEQUENCE
+    const tbs = header();           // TBSCertificate SEQUENCE
+    const skip = () => { const h = header(); i = h.start + h.len; };
+    if (der[i] === 0xa0) skip();    // [0] version
+    skip(); skip(); skip(); skip(); skip(); // serial, signature alg, issuer, validity, subject
+    const spki = header();
+    return der.slice(spki.start - (spki.len > 127 ? (spki.len > 255 ? 4 : 3) : 2), spki.start + spki.len);
+  }
+
+  async function ecdsaVerify(publicKey, signature, data) {
+    const hash = { 32: "SHA-256", 48: "SHA-384", 66: "SHA-512" }[signature.length / 2];
+    return crypto.subtle.verify({ name: "ECDSA", hash }, publicKey, signature, data);
+  }
+
+  const sigStructure = (protectedBytes, payload) => cborEncode(["Signature1", protectedBytes, new Uint8Array(0), payload]);
+
+  /** Checks one document of a decrypted DeviceResponse. Returns {issuerSignature, digests, deviceSignature}. */
+  async function verifyDocument(doc, transcript, deviceKeyOverride) {
+    const issuerSigned = doc.get("issuerSigned");
+    const [prot, unprot, payload, sig] = issuerSigned.get("issuerAuth");
+    let x5 = unprot.get(33); x5 = x5 instanceof Uint8Array ? x5 : x5[0];
+    const curve = { 64: "P-256", 96: "P-384", 132: "P-521" }[sig.length];
+    const dsKey = await crypto.subtle.importKey("spki", spkiFromCertificate(x5), { name: "ECDSA", namedCurve: curve }, false, ["verify"]);
+    const issuerSignature = await ecdsaVerify(dsKey, sig, sigStructure(prot, payload));
+
+    const mso = cborDecode(cborDecode(payload).value);
+    const hashName = { "SHA-256": "SHA-256", "SHA-384": "SHA-384", "SHA-512": "SHA-512" }[mso.get("digestAlgorithm")];
+    let digests = true;
+    for (const [ns, items] of issuerSigned.get("nameSpaces")) {
+      for (const item of items) {
+        const e = cborDecode(item.value);
+        const actual = new Uint8Array(await crypto.subtle.digest(hashName, cborEncode(item)));
+        const expected = mso.get("valueDigests").get(ns)?.get(e.get("digestID"));
+        if (!expected || hex(actual) !== hex(expected)) digests = false;
+      }
+    }
+
+    // DeviceAuthentication over the session transcript, with the device key
+    // the issuer bound into the MSO (or an override, for tests).
+    const deviceSigned = doc.get("deviceSigned");
+    const [dprot, , , dsig] = deviceSigned.get("deviceAuth").get("deviceSignature");
+    const coseKey = mso.get("deviceKeyInfo").get("deviceKey");
+    const jwk = deviceKeyOverride ?? { kty: "EC", crv: "P-256", x: b64url(coseKey.get(-2)), y: b64url(coseKey.get(-3)) };
+    const deviceKey = await crypto.subtle.importKey("jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+    const deviceAuthentication = ["DeviceAuthentication", transcript, doc.get("docType"), deviceSigned.get("nameSpaces")];
+    const detached = cborEncode(new Tag(24, cborEncode(deviceAuthentication)));
+    const deviceSignature = await ecdsaVerify(deviceKey, dsig, sigStructure(dprot, detached));
+
+    return { issuerSignature, digests, deviceSignature, validUntil: mso.get("validityInfo")?.get("validUntil") };
+  }
+
+  root.VCu = { Tag, cborEncode, cborDecode, b64url, fromB64url, hex, hpkeOpen, sessionTranscript, openResponse, verifyDocument };
 })(globalThis);

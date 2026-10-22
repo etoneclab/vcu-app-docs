@@ -41,8 +41,8 @@
 <main>
   <h1>VCu DC API Test Verifier</h1>
   <p class="sub">Sends an ISO 18013-7 Annex C (<code>org-iso-mdoc</code>) mDL request via
-    <code>navigator.credentials.get</code> and decrypts the response in the browser. Debugging tool only:
-    issuer and device signatures are not verified.</p>
+    <code>navigator.credentials.get</code>, decrypts the response in the browser and checks issuer signature,
+    element digests and device signature. Debugging tool only: the issuer certificate is not chain-validated.</p>
 
   <div id="env"></div>
 

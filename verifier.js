@@ -1,96 +1,76 @@
-// Minimal ISO 18013-7 Annex C ("org-iso-mdoc") request builder for testing the
-// VCu Wallet document provider extension from Safari 26+. Request side only:
-// the HPKE-encrypted response is logged raw, and the ephemeral private key is
-// kept in memory (`state.recipientKey`) for a later decrypting version.
+// ISO 18013-7 Annex C ("org-iso-mdoc") test verifier for the VCu iOS
+// wallet. Builds the request, calls the Digital Credentials API, then
+// HPKE-decrypts the response with the ephemeral key kept in memory and shows
+// the disclosed elements. Issuer and device signatures are NOT verified here
+// — this is a debugging tool, not a verifier anyone should trust.
 
 "use strict";
 
-// --- Minimal CBOR encoder (definite lengths only) --------------------------
-
-class Tag { constructor(tag, value) { this.tag = tag; this.value = value; } }
-
-function cborEncode(value) {
-  const out = [];
-  const head = (major, n) => {
-    if (n < 24) out.push((major << 5) | n);
-    else if (n < 0x100) out.push((major << 5) | 24, n);
-    else if (n < 0x10000) out.push((major << 5) | 25, n >> 8, n & 0xff);
-    else out.push((major << 5) | 26, (n >>> 24) & 0xff, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff);
-  };
-  const enc = (v) => {
-    if (v === null) out.push(0xf6);
-    else if (v === false) out.push(0xf4);
-    else if (v === true) out.push(0xf5);
-    else if (typeof v === "number") {
-      if (!Number.isInteger(v)) throw new Error("floats not supported");
-      v >= 0 ? head(0, v) : head(1, -1 - v);
-    } else if (typeof v === "string") {
-      const b = new TextEncoder().encode(v); head(3, b.length); out.push(...b);
-    } else if (v instanceof Uint8Array) {
-      head(2, v.length); out.push(...v);
-    } else if (v instanceof Tag) {
-      head(6, v.tag); enc(v.value);
-    } else if (Array.isArray(v)) {
-      head(4, v.length); v.forEach(enc);
-    } else if (v instanceof Map) {
-      head(5, v.size); for (const [k, x] of v) { enc(k); enc(x); }
-    } else if (typeof v === "object") {
-      const entries = Object.entries(v); head(5, entries.length);
-      for (const [k, x] of entries) { enc(k); enc(x); }
-    } else throw new Error("unsupported CBOR type: " + typeof v);
-  };
-  enc(value);
-  return new Uint8Array(out);
-}
-
-// Tag 24: embedded CBOR data item, used for ItemsRequestBytes.
-const embedded = (v) => new Tag(24, cborEncode(v));
-
-// --- Helpers ---------------------------------------------------------------
-
-const b64url = (bytes) =>
-  btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-const hex = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-const fromHex = (s) => {
-  const clean = s.replace(/[\s:]/g, "");
-  if (!/^([0-9a-fA-F]{2})+$/.test(clean)) throw new Error("issuer AKI is not valid hex");
-  return new Uint8Array(clean.match(/../g).map((h) => parseInt(h, 16)));
-};
+const { Tag, cborEncode, cborDecode, b64url, fromB64url, hex, openResponse } = globalThis.VCu;
 
 const logEl = document.getElementById("log");
+const resultEl = document.getElementById("result");
 const log = (msg) => { logEl.textContent += "\n" + msg; };
 const state = {};
 
 // --- Request construction --------------------------------------------------
 
-async function buildRequest(elements, akiHex) {
-  // Ephemeral reader key: its public half goes into EncryptionInfo so the
-  // wallet can HPKE-encrypt the response to us.
-  state.recipientKey = await crypto.subtle.generateKey(
-    { name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
-  const jwk = await crypto.subtle.exportKey("jwk", state.recipientKey.publicKey);
-  const coord = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
-
+async function buildRequest(docType, namespace, elements, akiHex) {
+  // Ephemeral reader key; the wallet HPKE-encrypts the response to it.
+  state.recipientKey = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const raw = new Uint8Array(await crypto.subtle.exportKey("raw", state.recipientKey.publicKey));
   // COSE_Key: kty EC2 (1:2), crv P-256 (-1:1), x (-2), y (-3).
-  const coseKey = new Map([[1, 2], [-1, 1], [-2, coord(jwk.x)], [-3, coord(jwk.y)]]);
-  const nonce = crypto.getRandomValues(new Uint8Array(16));
-  const encryptionInfo = ["dcapi", { nonce, recipientPublicKey: coseKey }];
+  const coseKey = new Map([[1, 2], [-1, 1], [-2, raw.slice(1, 33)], [-3, raw.slice(33, 65)]]);
+  const encryptionInfo = ["dcapi", { nonce: crypto.getRandomValues(new Uint8Array(16)), recipientPublicKey: coseKey }];
 
   const nameSpace = {};
-  for (const el of elements) nameSpace[el] = false; // false = intentToRetain: no
-  const itemsRequest = { docType: "org.iso.18013.5.1.mDL", nameSpaces: { "org.iso.18013.5.1": nameSpace } };
+  for (const el of elements) nameSpace[el] = false; // intentToRetain: no
+  const itemsRequest = { docType, nameSpaces: { [namespace]: nameSpace } };
   if (akiHex) itemsRequest.requestInfo = { issuerIdentifiers: [fromHex(akiHex)] };
-
-  const deviceRequest = { version: "1.0", docRequests: [{ itemsRequest: embedded(itemsRequest) }] };
+  const deviceRequest = { version: "1.0", docRequests: [{ itemsRequest: new Tag(24, cborEncode(itemsRequest)) }] };
 
   return {
     protocol: "org-iso-mdoc",
-    data: {
-      deviceRequest: b64url(cborEncode(deviceRequest)),
-      encryptionInfo: b64url(cborEncode(encryptionInfo)),
-    },
+    data: { deviceRequest: b64url(cborEncode(deviceRequest)), encryptionInfo: b64url(cborEncode(encryptionInfo)) },
   };
 }
+
+function fromHex(s) {
+  const clean = s.replace(/[\s:]/g, "");
+  if (!/^([0-9a-fA-F]{2})+$/.test(clean)) throw new Error("issuer AKI is not valid hex");
+  return new Uint8Array(clean.match(/../g).map((h) => parseInt(h, 16)));
+}
+
+// --- Response --------------------------------------------------------------
+
+/** The response field's shape isn't pinned down for iOS yet; accept the
+ *  Annex C `{response: base64url}` object, a bare base64url string, or bytes. */
+function encryptedResponseBytes(data) {
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (typeof data === "string") return fromB64url(data);
+  if (data && typeof data.response === "string") return fromB64url(data.response);
+  throw new Error("unrecognized response shape: " + JSON.stringify(data).slice(0, 200));
+}
+
+function show(deviceResponse) {
+  const rows = [];
+  for (const doc of deviceResponse.get("documents") ?? []) {
+    rows.push(`<h2>${escapeHtml(doc.get("docType"))}</h2><table>`);
+    for (const [ns, items] of doc.get("issuerSigned").get("nameSpaces")) {
+      for (const item of items) {
+        const e = cborDecode(item.value);
+        const value = e.get("elementValue");
+        const shown = value instanceof Uint8Array ? `<${value.length} bytes>` : value instanceof Tag ? `tag ${value.tag}: ${value.value}` : String(value);
+        rows.push(`<tr><td>${escapeHtml(ns)}</td><td>${escapeHtml(e.get("elementIdentifier"))}</td><td>${escapeHtml(shown)}</td></tr>`);
+      }
+    }
+    const signed = doc.get("deviceSigned")?.get("deviceAuth")?.has("deviceSignature");
+    rows.push(`</table><p class="hint">Device signature present: ${signed ? "yes" : "no"} (not verified by this page).</p>`);
+  }
+  resultEl.innerHTML = rows.join("");
+}
+
+const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
 // --- Environment check -----------------------------------------------------
 
@@ -111,30 +91,32 @@ function describeEnvironment() {
 
 document.getElementById("go").addEventListener("click", async (ev) => {
   const button = ev.currentTarget;
+  const namespace = document.getElementById("ns").value.trim();
   const elements = [...document.querySelectorAll("input[name=el]:checked")].map((i) => i.value);
   const akiHex = document.getElementById("aki").value.trim();
   logEl.textContent = `[${new Date().toISOString()}] origin ${location.origin}`;
+  resultEl.innerHTML = "";
 
   let request;
   try {
-    request = await buildRequest(elements, akiHex);
+    request = await buildRequest("org.iso.18013.5.1.mDL", namespace, elements, akiHex);
   } catch (e) {
     log("Failed to build request: " + e.message);
     return;
   }
   log("Request:\n" + JSON.stringify(request, null, 2));
-  log("deviceRequest CBOR hex (paste into cbor.me):\n" +
-      hex(Uint8Array.from(atob(request.data.deviceRequest.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0))));
+  log("deviceRequest CBOR hex (paste into cbor.me):\n" + hex(fromB64url(request.data.deviceRequest)));
 
   button.disabled = true;
   try {
-    // Must run inside the click handler: the API requires transient user activation.
-    const credential = await navigator.credentials.get({
-      mediation: "required",
-      digital: { requests: [request] },
-    });
-    log("Credential returned. protocol=" + credential.protocol);
-    log("Raw data (HPKE-encrypted, not decrypted in this version):\n" + JSON.stringify(credential.data, null, 2));
+    // Must run inside the click handler: the API requires user activation.
+    const credential = await navigator.credentials.get({ mediation: "required", digital: { requests: [request] } });
+    log(`Credential returned. protocol=${credential.protocol}`);
+    log("Raw data:\n" + JSON.stringify(credential.data, null, 2).slice(0, 2000));
+    const deviceResponse = await openResponse(state.recipientKey, encryptedResponseBytes(credential.data),
+                                              request.data.encryptionInfo, location.origin);
+    log("Decrypted DeviceResponse, status " + deviceResponse.get("status"));
+    show(deviceResponse);
   } catch (e) {
     // NotAllowedError: user cancelled or no matching provider; AbortError: timeout/cancel.
     log(`Error: ${e.name}: ${e.message}`);

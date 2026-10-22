@@ -30,6 +30,9 @@
   button:disabled { opacity: .5; }
   #env { font-size: .85rem; margin: 0 0 16px; }
   .ok { color: var(--ok); } .err { color: var(--err); }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; margin: 8px 0; }
+  td { border-top: 1px solid var(--line); padding: 6px 4px; word-break: break-all; }
+  h2 { font-size: 1.1rem; margin: 20px 0 4px; }
   pre { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px;
         font: 12px/1.45 ui-monospace, monospace; white-space: pre-wrap; word-break: break-all; margin: 16px 0 0; }
 </style>
@@ -38,12 +41,20 @@
 <main>
   <h1>VCu DC API Test Verifier</h1>
   <p class="sub">Sends an ISO 18013-7 Annex C (<code>org-iso-mdoc</code>) mDL request via
-    <code>navigator.credentials.get</code>. Debugging tool only: no trust validation, and responses are not decrypted.</p>
+    <code>navigator.credentials.get</code> and decrypts the response in the browser. Debugging tool only:
+    issuer and device signatures are not verified.</p>
 
   <div id="env"></div>
 
   <fieldset>
-    <legend>Requested elements (org.iso.18013.5.1)</legend>
+    <legend>Namespace</legend>
+    <input type="text" id="ns" value="org.iso.18013.5.1" autocomplete="off" spellcheck="false">
+    <p class="hint">ISO mDL namespace by default. The VCu platform currently issues mDL elements under
+      <code>org.iso.18013.5.1.mDL</code> (pending its namespace fix) — use that to test with today's credentials.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Requested elements</legend>
     <label><input type="checkbox" name="el" value="age_over_18" checked> age_over_18</label>
     <label><input type="checkbox" name="el" value="given_name"> given_name</label>
     <label><input type="checkbox" name="el" value="family_name"> family_name</label>
@@ -54,13 +65,16 @@
     <legend>Experimental</legend>
     <label for="aki">Issuer authority key identifier (hex)</label>
     <input type="text" id="aki" placeholder="empty = no issuer filter" autocomplete="off" spellcheck="false">
-    <p class="hint">Adds <code>requestInfo.issuerIdentifiers</code> (18013-5 2nd edition, placement unverified).
-      Use it to test whether iOS matches this against the wallet's registered <code>supportedAuthorityKeyIdentifiers</code>.</p>
+    <p class="hint">Adds <code>requestInfo.issuerIdentifiers</code> (18013-5 2nd edition, placement unverified): a
+      request-side filter on the credential's issuer. Unrelated to the wallet's registered
+      <code>supportedAuthorityKeyIdentifiers</code>, which name verifier (reader) roots.</p>
   </fieldset>
 
   <button id="go">Request mDL</button>
+  <div id="result"></div>
   <pre id="log">Log appears here.</pre>
 </main>
+<script src="lib.js"></script>
 <script src="verifier.js"></script>
 </body>
 </html>

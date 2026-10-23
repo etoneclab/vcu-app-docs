@@ -74,8 +74,8 @@
 
   <fieldset style="margin-top:24px">
     <legend>Request from the VCu platform</legend>
-    <textarea id="platformRequest" rows="4" placeholder='Paste the output of node Scripts/sandbox-dcapi.mjs' style="width:100%;font:12px ui-monospace,monospace;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px"></textarea>
-    <p class="hint">The platform built and holds the decryption key for this request, so this page can't decrypt the answer: copy it and forward it with <code>pbpaste | node Scripts/sandbox-dcapi.mjs --forward</code>.</p>
+    <textarea id="platformRequest" rows="4" placeholder='Paste what node Scripts/sandbox-dcapi.mjs put on the clipboard' style="width:100%;font:12px ui-monospace,monospace;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px"></textarea>
+    <p class="hint">The platform built and holds the decryption key for this request, so this page can't decrypt the answer: copy it, then run <code>node Scripts/sandbox-dcapi.mjs --forward</code> on the Mac.</p>
     <button id="goPlatform">Send platform request</button>
     <button id="copyResponse" style="margin-top:8px;display:none">Copy response</button>
   </fieldset>

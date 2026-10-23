@@ -140,12 +140,16 @@ document.getElementById("goPlatform").addEventListener("click", async (ev) => {
   const button = ev.currentTarget;
   logEl.textContent = `[${new Date().toISOString()}] origin ${location.origin} (platform request)`;
   resultEl.innerHTML = "";
+  // Tolerate extra text around the array (e.g. a copied terminal line).
+  const pasted = document.getElementById("platformRequest").value;
+  const start = pasted.indexOf("["), end = pasted.lastIndexOf("]");
   let requests;
   try {
-    requests = JSON.parse(document.getElementById("platformRequest").value.trim());
-    if (!Array.isArray(requests)) throw new Error("expected the JSON array printed by the script");
+    if (start < 0 || end <= start) throw new Error("no request array found");
+    requests = JSON.parse(pasted.slice(start, end + 1));
+    if (!Array.isArray(requests) || !requests.every((r) => r.protocol && r.data)) throw new Error("not a list of {protocol, data}");
   } catch (e) {
-    log("Not a platform request: " + e.message);
+    log(`Not a platform request (${e.message}). Run node Scripts/sandbox-dcapi.mjs on the Mac — it copies the request to the clipboard — and paste that here.`);
     return;
   }
   button.disabled = true;
@@ -165,7 +169,7 @@ document.getElementById("goPlatform").addEventListener("click", async (ev) => {
 document.getElementById("copyResponse").addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText(platformResponse);
-    log("Response copied. On the Mac: pbpaste | node Scripts/sandbox-dcapi.mjs --forward");
+    log("Response copied. On the Mac: node Scripts/sandbox-dcapi.mjs --forward");
   } catch (e) {
     log("Copy failed: " + e.message);
   }

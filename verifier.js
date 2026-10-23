@@ -133,4 +133,42 @@ document.getElementById("go").addEventListener("click", async (ev) => {
   }
 });
 
+// --- Platform-built requests (the platform holds the decryption key) -------
+
+let platformResponse = null;
+document.getElementById("goPlatform").addEventListener("click", async (ev) => {
+  const button = ev.currentTarget;
+  logEl.textContent = `[${new Date().toISOString()}] origin ${location.origin} (platform request)`;
+  resultEl.innerHTML = "";
+  let requests;
+  try {
+    requests = JSON.parse(document.getElementById("platformRequest").value.trim());
+    if (!Array.isArray(requests)) throw new Error("expected the JSON array printed by the script");
+  } catch (e) {
+    log("Not a platform request: " + e.message);
+    return;
+  }
+  button.disabled = true;
+  try {
+    const credential = await navigator.credentials.get({ mediation: "required", digital: { requests } });
+    platformResponse = JSON.stringify({ protocol: credential.protocol, data: credential.data });
+    log(`Credential returned. protocol=${credential.protocol}`);
+    log("Response (encrypted to the platform):\n" + platformResponse.slice(0, 400) + "…");
+    document.getElementById("copyResponse").style.display = "block";
+  } catch (e) {
+    log(`Error: ${e.name}: ${e.message}`);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.getElementById("copyResponse").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(platformResponse);
+    log("Response copied. On the Mac: pbpaste | node Scripts/sandbox-dcapi.mjs --forward");
+  } catch (e) {
+    log("Copy failed: " + e.message);
+  }
+});
+
 describeEnvironment();
